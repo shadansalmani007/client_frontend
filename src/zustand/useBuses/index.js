@@ -1,0 +1,97 @@
+import { create } from "zustand";
+
+const dummyBuses = [
+  {
+    id: 1,
+    name: "Zambia Express",
+    rating: 4.8,
+    type: "AC Sleeper",
+    seats: 40,
+    amenities: ["WiFi", "AC", "Meals"],
+    departure: "22:00",
+    arrival: "03:30",
+    duration: "05h 30m",
+    price: 1299,
+    availableSeats: 23,
+    from: "Lusaka",
+    to: "Ndola",
+  },
+  {
+    id: 2,
+    name: "Power Tools Bus",
+    rating: 4.5,
+    type: "AC Seater",
+    seats: 45,
+    amenities: ["WiFi", "AC"],
+    departure: "07:30",
+    arrival: "13:30",
+    duration: "06h 00m",
+    price: 950,
+    availableSeats: 12,
+    from: "Lusaka",
+    to: "Ndola",
+  },
+  {
+    id: 3,
+    name: "Royal Bus Service",
+    rating: 4.2,
+    type: "Sleeper",
+    seats: 36,
+    amenities: ["AC", "Meals"],
+    departure: "10:00",
+    arrival: "15:45",
+    duration: "05h 45m",
+    price: 1750,
+    availableSeats: 6,
+    from: "Lusaka",
+    to: "Ndola",
+  },
+  {
+    id: 4,
+    name: "Copperbelt Travels",
+    rating: 4.6,
+    type: "AC Sleeper",
+    seats: 42,
+    amenities: ["WiFi", "AC", "Meals", "USB"],
+    departure: "18:00",
+    arrival: "23:30",
+    duration: "05h 30m",
+    price: 1450,
+    availableSeats: 18,
+    from: "Lusaka",
+    to: "Ndola",
+  },
+  {
+    id: 5,
+    name: "SmartLink Coaches",
+    rating: 4.3,
+    type: "AC Seater",
+    seats: 50,
+    amenities: ["WiFi", "AC"],
+    departure: "12:00",
+    arrival: "18:00",
+    duration: "06h 00m",
+    price: 1100,
+    availableSeats: 25,
+    from: "Lusaka",
+    to: "Ndola",
+  },
+];
+
+const useBuses = create((set, get) => ({
+  buses: [],
+  selectedBus: null,
+  setBuses: (buses) => set({ buses }),
+  setSelectedBus: (bus) => set({ selectedBus: bus }),
+  loadBuses: (from, to) => {
+    const routeBuses = dummyBuses.map((bus) => ({
+      ...bus,
+      from,
+      to,
+    }));
+    set({ buses: routeBuses });
+  },
+  clearBuses: () => set({ buses: [], selectedBus: null }),
+}));
+
+export default useBuses;
