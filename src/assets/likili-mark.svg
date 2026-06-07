@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Likili Motorways</title>
+  <desc id="desc">Rounded red square with a stylized bus icon and gold accent.</desc>
+  <defs>
+    <linearGradient id="bg" x1="16" x2="144" y1="16" y2="144" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#922233" />
+      <stop offset="0.62" stop-color="#cf3d4f" />
+      <stop offset="1" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+  <rect width="160" height="160" rx="38" fill="url(#bg)" />
+  <path
+    fill="#fff7d6"
+    d="M45 55c0-17 17-24 35-24s35 7 35 24v38c0 8-3 14-8 18v11a6 6 0 0 1-6 6h-6a6 6 0 0 1-6-6v-7H71v7a6 6 0 0 1-6 6h-6a6 6 0 0 1-6-6v-11c-5-4-8-10-8-18V55Zm16 4v24h38V59H61Zm7 43a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm24 0a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"
+  />
+  <path
+    fill="#fff"
+    d="M68 66h10a5 5 0 0 1 0 10H68a5 5 0 0 1 0-10Zm18 0h8a5 5 0 0 1 0 10h-8a5 5 0 0 1 0-10Z"
+    opacity=".78"
+  />
+</svg>
