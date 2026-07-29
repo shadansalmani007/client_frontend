@@ -14,8 +14,16 @@ import { ErrorAlert } from "../../components/ErrorAlert.jsx";
 import { Pagination } from "../../components/Pagination.jsx";
 import { SearchForm } from "../../components/SearchForm.jsx";
 import { useSearchStore } from "../../store/search.store.js";
+import { getResolvedFare } from "../../utils/fare.js";
 import { formatDate, getTodayDateValue, isPastDate, parseTimeToMinutes } from "../../utils/format.js";
 import { queryKeys } from "../../utils/queryKeys.js";
+import {
+  formatLocationPoint,
+  getStopDisplayName,
+  normalizeIntermediateStops,
+  normalizeLocationPoints,
+  normalizeRouteStop,
+} from "../../utils/route-segments.js";
 
 function parseFilters(searchParams, savedFilters) {
   const today = getTodayDateValue();
@@ -59,11 +67,12 @@ function getDepartureMinutes(time) {
 }
 
 function getBusPrice(bus) {
-  return Number(bus?.basePrice ?? bus?.price ?? 0);
+  return Number(getResolvedFare(bus) ?? 0);
 }
 
 function buildDefaultRefinements() {
   return {
+    scheduleSearch: "",
     departureTime: "all",
     price: "all",
   };
@@ -71,6 +80,10 @@ function buildDefaultRefinements() {
 
 function getActiveRefinementBadges(refinements) {
   const badges = [];
+
+  if (String(refinements.scheduleSearch || "").trim()) {
+    badges.push(`Search: ${String(refinements.scheduleSearch).trim()}`);
+  }
 
   if (refinements.departureTime !== "all") {
     const matchingOption = TIME_FILTER_OPTIONS.find(
@@ -98,6 +111,49 @@ function sortBuses(list, priceOrder) {
     default:
       return items;
   }
+}
+
+function normalizeSearchText(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function getBusSearchableText(bus, filters) {
+  const sourceStop = normalizeRouteStop(bus?.sourceStop);
+  const destinationStop = normalizeRouteStop(bus?.destinationStop);
+  const boardingPoints = normalizeLocationPoints(bus?.boardingPoints);
+  const droppingPoints = normalizeLocationPoints(bus?.droppingPoints);
+  const intermediateStops = normalizeIntermediateStops(bus?.intermediateStops);
+
+  return [
+    bus?.busName,
+    bus?.name,
+    bus?.busNumber,
+    bus?.scheduleId,
+    bus?.routeId,
+    bus?.source,
+    bus?.destination,
+    filters?.source,
+    filters?.destination,
+    sourceStop?.city,
+    sourceStop?.name,
+    destinationStop?.city,
+    destinationStop?.name,
+    ...boardingPoints.map((point) => formatLocationPoint(point)),
+    ...droppingPoints.map((point) => formatLocationPoint(point)),
+    ...intermediateStops.map((stop) => getStopDisplayName(stop)),
+  ]
+    .map(normalizeSearchText)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function matchesScheduleSearch(bus, filters, searchTerm) {
+  const normalizedTerm = normalizeSearchText(searchTerm);
+  if (!normalizedTerm) {
+    return true;
+  }
+
+  return getBusSearchableText(bus, filters).includes(normalizedTerm);
 }
 
 export function SearchPage() {
@@ -177,13 +233,14 @@ export function SearchPage() {
       const departureBucket = getTimeBucket(bus?.departureTime);
 
       return (
+        matchesScheduleSearch(bus, activeTripFilters, refinements.scheduleSearch) &&
         (refinements.departureTime === "all" ||
           departureBucket === refinements.departureTime)
       );
     });
 
     return sortBuses(refined, refinements.price);
-  }, [buses, refinements]);
+  }, [activeTripFilters, buses, refinements]);
 
   const activeRefinementBadges = useMemo(
     () => getActiveRefinementBadges(refinements),
@@ -325,6 +382,9 @@ export function SearchPage() {
                   <ResultsFilterBar
                     refinements={refinements}
                     activeFilterCount={activeFilterCount}
+                    onScheduleSearchChange={(value) =>
+                      setRefinements((current) => ({ ...current, scheduleSearch: value }))
+                    }
                     onDepartureChange={(value) =>
                       setRefinements((current) => ({ ...current, departureTime: value }))
                     }
@@ -445,13 +505,20 @@ function TripMeta({ icon: Icon, label, strong = false }) {
 function ResultsFilterBar({
   refinements,
   activeFilterCount,
+  onScheduleSearchChange,
   onDepartureChange,
   onPriceChange,
   onClear,
 }) {
   return (
     <div className="rounded-[1.35rem] border border-slate-200 bg-slate-50/80 p-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[190px_190px_auto] xl:items-end">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_190px_190px_auto] xl:items-end">
+        <FilterInput
+          label="Search schedule"
+          value={refinements.scheduleSearch}
+          onChange={onScheduleSearchChange}
+          placeholder="Search city, stop, bus, or schedule"
+        />
         <FilterSelect
           label="Departure"
           value={refinements.departureTime}
@@ -490,6 +557,23 @@ function ResultsFilterBar({
         </button>
       </div>
     </div>
+  );
+}
+
+function FilterInput({ label, value, onChange, placeholder }) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        {label}
+      </span>
+      <input
+        type="text"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-brand-300 focus:ring-2 focus:ring-brand-100"
+      />
+    </label>
   );
 }
 

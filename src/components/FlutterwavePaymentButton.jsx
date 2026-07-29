@@ -6,6 +6,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { verifyFlutterwavePayment } from "../api/payment.api.js";
 import likiliMarkUrl from "../assets/likili-mark.svg";
 import { useUiStore } from "../store/ui.store.js";
+import { getBookingNumber, getBookingNumberValue } from "../utils/booking.js";
 import { queryKeys } from "../utils/queryKeys.js";
 
 const MOBILE_MONEY_NETWORKS = [
@@ -60,10 +61,12 @@ function getResolvedBookingId(payload, fallbackBookingId) {
 
 function normalizeVerifiedBookingDetails(payload) {
   const data = getVerificationData(payload);
+  const ticket = data?.ticket && typeof data.ticket === "object" ? data.ticket : null;
+  const bookingSource = data?.booking || data?.ticket?.booking || ticket;
   const booking =
-    data?.booking ||
-    data?.ticket?.booking ||
-    (data?.ticket && typeof data.ticket === "object" ? data.ticket : null);
+    ticket && bookingSource && ticket !== bookingSource
+      ? { ...bookingSource, ticket }
+      : bookingSource;
   const payments = Array.isArray(data?.payments)
     ? data.payments
     : Array.isArray(booking?.payments)
@@ -163,6 +166,8 @@ export function FlutterwavePaymentButton({
       const resolvedBookingId = getResolvedBookingId(payload, bookingId);
       const normalizedBookingDetails = normalizeVerifiedBookingDetails(payload);
       const verificationData = getVerificationData(payload);
+      const resolvedBooking = normalizedBookingDetails?.booking || verificationData?.booking || {};
+      const ticketNumber = getBookingNumberValue(resolvedBooking);
       const verifiedPayment =
         normalizedBookingDetails?.payments?.[0] || verificationData?.payment || null;
       const verifiedPaymentId =
@@ -179,7 +184,9 @@ export function FlutterwavePaymentButton({
       addToast({
         type: "success",
         title: "Payment verified",
-        message: payload?.message || "Your Flutterwave payment was verified successfully.",
+        message: ticketNumber
+          ? `${payload?.message || "Your Flutterwave payment was verified successfully."} Ticket No: ${getBookingNumber(resolvedBooking)}.`
+          : payload?.message || "Your Flutterwave payment was verified successfully.",
       });
 
       if (typeof window !== "undefined") {
@@ -197,6 +204,8 @@ export function FlutterwavePaymentButton({
       navigate(`/bookings/${resolvedBookingId}`, {
         replace: true,
         state: {
+          paymentSuccessful: true,
+          ticketNumber: ticketNumber ? getBookingNumber(resolvedBooking) : "",
           transactionId: variables?.transactionId || null,
           txRef: variables?.txRef || null,
           verificationData,

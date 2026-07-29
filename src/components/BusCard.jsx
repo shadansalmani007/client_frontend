@@ -8,9 +8,12 @@ import {
 } from "lucide-react";
 import { Link, createSearchParams } from "react-router-dom";
 import { useBookingStore } from "../store/booking.store.js";
-import { calculateDuration, formatCurrency } from "../utils/format.js";
+import { getResolvedFare } from "../utils/fare.js";
+import { calculateDuration, formatCurrency, hasDateTimePassed } from "../utils/format.js";
 import {
   formatLocationPoint,
+  getRouteStopArrivalTime,
+  getRouteStopDepartureTime,
   getPointCity,
   normalizeIntermediateStops,
   normalizeLocationPoints,
@@ -18,12 +21,15 @@ import {
 } from "../utils/route-segments.js";
 
 function createBusHref(bus, fallbackFilters) {
+  const resolvedFare = getResolvedFare(bus) ?? 0;
   const params = createSearchParams({
     scheduleId: bus.scheduleId || "",
     routeId: bus.routeId || "",
     date: fallbackFilters.date || "",
-    source: bus.source || fallbackFilters.source || "",
-    destination: bus.destination || fallbackFilters.destination || "",
+    source: fallbackFilters.source || bus.source || "",
+    destination: fallbackFilters.destination || bus.destination || "",
+    basePrice: String(resolvedFare),
+    currency: bus.currency || "",
   });
 
   return `/buses/${bus.busId || bus._id || bus.id}?${params.toString()}`;
@@ -78,32 +84,43 @@ function getAmenityMeta(amenity) {
 
 export function BusCard({ bus, filters }) {
   const setScheduleContext = useBookingStore((state) => state.setScheduleContext);
+  const sourceStop = normalizeRouteStop(bus.sourceStop);
+  const destinationStop = normalizeRouteStop(bus.destinationStop);
+  const resolvedFare = getResolvedFare(bus) ?? 0;
   const amenities = Array.isArray(bus.amenities) ? bus.amenities.filter(Boolean) : [];
   const intermediateStops = normalizeIntermediateStops(bus.intermediateStops);
   const boardingPoints = normalizeLocationPoints(bus.boardingPoints);
   const droppingPoints = normalizeLocationPoints(bus.droppingPoints);
   const sourceLabel =
-    bus.source || bus.sourceStop?.city || getPointCity(boardingPoints[0]) || filters.source || "Source";
+    bus.source || sourceStop?.city || getPointCity(boardingPoints[0]) || filters.source || "Source";
   const destinationLabel =
     bus.destination ||
-    bus.destinationStop?.city ||
+    destinationStop?.city ||
     getPointCity(droppingPoints[0]) ||
     filters.destination ||
     "Destination";
   const pickupLabel = getPrimaryPointLabel(
     boardingPoints,
-    bus.sourceStop?.name || bus.sourceStop?.city || sourceLabel,
+    sourceStop?.name || sourceStop?.city || sourceLabel,
   );
   const dropLabel = getPrimaryPointLabel(
     droppingPoints,
-    bus.destinationStop?.name || bus.destinationStop?.city || destinationLabel,
+    destinationStop?.name || destinationStop?.city || destinationLabel,
+  );
+  const departureDisplayTime = getRouteStopDepartureTime(
+    sourceStop,
+    bus.effectiveDepartureTime || bus.departureTime,
+  );
+  const arrivalDisplayTime = getRouteStopArrivalTime(
+    destinationStop,
+    bus.effectiveArrivalTime || bus.arrivalTime,
   );
   const duration =
-    calculateDuration(bus.departureTime, bus.arrivalTime) ||
+    calculateDuration(departureDisplayTime, arrivalDisplayTime) ||
     bus.duration ||
     "Duration unavailable";
   const busType = getBusType(bus);
-  const price = formatCurrency(bus.basePrice ?? bus.price, bus.currency);
+  const price = formatCurrency(resolvedFare, bus.currency);
   const availableSeats = Number(bus.availableSeats ?? 0);
   const seatCapacity = getSeatCapacity(bus);
   const stopsLabel = intermediateStops.length
@@ -113,11 +130,17 @@ export function BusCard({ bus, filters }) {
   const ratingAvailable = Number.isFinite(rating) && rating > 0;
   const displayAmenities = amenities.slice(0, 3).map(getAmenityMeta);
   const seatsMetaLabel = seatCapacity ? `${seatCapacity} seats` : `${availableSeats} seats`;
+  const departurePassed = hasDateTimePassed(
+    filters.date || bus.departureDate || bus.date || "",
+    departureDisplayTime,
+  );
   const seatAvailabilityLabel =
-    availableSeats > 0
+    departurePassed
+      ? "Departure passed"
+      : availableSeats > 0
       ? `Only ${availableSeats} seat${availableSeats === 1 ? "" : "s"} left`
       : "Sold out";
-  const canSelectSeats = availableSeats > 0;
+  const canSelectSeats = availableSeats > 0 && !departurePassed;
 
   return (
     <article className="group rounded-[1.9rem] border border-slate-200/80 bg-white p-5 shadow-[0_18px_55px_rgba(15,23,42,0.05)] transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_24px_80px_rgba(15,23,42,0.08)] sm:p-6">
@@ -202,7 +225,7 @@ export function BusCard({ bus, filters }) {
               </p>
               <p className="mt-1 truncate font-semibold text-slate-700">{pickupLabel}</p>
               <p className="mt-1 text-xs font-medium text-slate-500">
-                {bus.departureTime || "TBD"}
+                {departureDisplayTime || "TBD"}
               </p>
             </div>
             <div className="rounded-xl bg-slate-50 px-3 py-2.5 sm:text-right">
@@ -211,7 +234,7 @@ export function BusCard({ bus, filters }) {
               </p>
               <p className="mt-1 truncate font-semibold text-slate-700">{dropLabel}</p>
               <p className="mt-1 text-xs font-medium text-slate-500">
-                {bus.arrivalTime || "TBD"}
+                {arrivalDisplayTime || "TBD"}
               </p>
             </div>
           </div>
@@ -237,32 +260,42 @@ export function BusCard({ bus, filters }) {
             </span>
           </div>
 
-          <Link
-            to={createBusHref(bus, filters)}
-            onClick={() =>
-              setScheduleContext({
-                busId: bus.busId || bus._id || bus.id || "",
-                scheduleId: bus.scheduleId || "",
-                routeId: bus.routeId || "",
-                date: filters.date || bus.departureDate || "",
-                source: bus.source || filters.source || "",
-                destination: bus.destination || filters.destination || "",
-                sourceStop: normalizeRouteStop(bus.sourceStop),
-                destinationStop: normalizeRouteStop(bus.destinationStop),
-                boardingPoints,
-                droppingPoints,
-                intermediateStops,
-              })
-            }
-            className={`inline-flex w-full items-center justify-center gap-2 rounded-[1rem] px-5 py-3 text-sm font-semibold transition xl:rounded-full ${
-              canSelectSeats
-                ? "bg-brand-500 text-white shadow-lg shadow-brand-500/20 hover:bg-brand-600"
-                : "pointer-events-none bg-slate-200 text-slate-500"
-            }`}
-          >
-            Select Seats
-            <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
-          </Link>
+          {departurePassed ? (
+            <p className="text-xs text-amber-700 xl:text-right">
+              This trip has already departed from {sourceLabel} at {departureDisplayTime}.
+            </p>
+          ) : null}
+
+          {canSelectSeats ? (
+            <Link
+              to={createBusHref(bus, filters)}
+              onClick={() =>
+                setScheduleContext({
+                  busId: bus.busId || bus._id || bus.id || "",
+                  scheduleId: bus.scheduleId || "",
+                  routeId: bus.routeId || "",
+                  date: filters.date || bus.departureDate || "",
+                  source: filters.source || bus.source || "",
+                  destination: filters.destination || bus.destination || "",
+                  basePrice: resolvedFare,
+                  currency: bus.currency || "",
+                  sourceStop,
+                  destinationStop,
+                  boardingPoints,
+                  droppingPoints,
+                  intermediateStops,
+                })
+              }
+              className="inline-flex w-full items-center justify-center gap-2 rounded-[1rem] bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/20 transition hover:bg-brand-600 xl:rounded-full"
+            >
+              Select Seats
+              <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+            </Link>
+          ) : (
+            <span className="inline-flex w-full items-center justify-center rounded-[1rem] bg-slate-200 px-5 py-3 text-sm font-semibold text-slate-500 xl:rounded-full">
+              {departurePassed ? "Booking closed" : "Sold out"}
+            </span>
+          )}
         </div>
       </div>
     </article>

@@ -10,6 +10,10 @@ function toDateInputValue(date) {
     .slice(0, 10);
 }
 
+export function getDateValue(date = new Date()) {
+  return toDateInputValue(date);
+}
+
 export function formatDate(value) {
   if (!value) {
     return "TBD";
@@ -42,7 +46,7 @@ export function formatRoute(source, destination) {
 }
 
 export function getTodayDateValue() {
-  return toDateInputValue(new Date());
+  return getDateValue(new Date());
 }
 
 export function formatBackendDate(value) {
@@ -116,4 +120,22 @@ export function calculateDuration(departureTime, arrivalTime) {
   const remainingMinutes = minutes % 60;
 
   return `${hours}h ${remainingMinutes}m`;
+}
+
+export function hasDateTimePassed(dateValue, timeValue, now = new Date()) {
+  if (!dateValue || !timeValue) {
+    return false;
+  }
+
+  const targetMinutes = parseTimeToMinutes(timeValue);
+  if (Number.isNaN(targetMinutes)) {
+    return false;
+  }
+
+  if (dateValue !== getDateValue(now)) {
+    return false;
+  }
+
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  return targetMinutes <= currentMinutes;
 }

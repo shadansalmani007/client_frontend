@@ -42,6 +42,16 @@ export function normalizeRouteStop(stop) {
   };
 }
 
+export function getRouteStopDepartureTime(stop, fallbackTime = "") {
+  const normalized = normalizeRouteStop(stop);
+  return firstDefined(normalizeText(fallbackTime), normalized?.departureTime, normalized?.arrivalTime) || "";
+}
+
+export function getRouteStopArrivalTime(stop, fallbackTime = "") {
+  const normalized = normalizeRouteStop(stop);
+  return firstDefined(normalizeText(fallbackTime), normalized?.arrivalTime, normalized?.departureTime) || "";
+}
+
 export function normalizeIntermediateStops(stops) {
   return asArray(stops).map(normalizeRouteStop).filter(Boolean);
 }

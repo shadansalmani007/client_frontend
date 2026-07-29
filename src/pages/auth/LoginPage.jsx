@@ -196,14 +196,24 @@ export function LoginPage() {
                   </div>
                 ) : null}
               </>
-            ) : import.meta.env.DEV ? (
+            ) : (
               <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                Google sign-in is hidden because <code>VITE_GOOGLE_CLIENT_ID</code> is not
-                loaded at runtime. Putting it in <code>.env.example</code> is not enough.
-                Add it to <code>.env</code> or <code>.env.local</code>, then restart the
-                Vite dev server.
+                {import.meta.env.DEV ? (
+                  <>
+                    Google sign-in is hidden because <code>VITE_GOOGLE_CLIENT_ID</code> is
+                    not loaded at runtime. Putting it in <code>.env.example</code> is not
+                    enough. Add it to <code>.env</code> or <code>.env.local</code>, then
+                    restart the Vite dev server.
+                  </>
+                ) : (
+                  <>
+                    Google sign-in is unavailable because <code>VITE_GOOGLE_CLIENT_ID</code>{" "}
+                    was not set when this app was built. Add that variable in Vercel Project
+                    Settings, then redeploy the frontend.
+                  </>
+                )}
               </div>
-            ) : null}
+            )}
 
             <p className="mt-6 text-sm text-slate-500">
               New customer?{" "}

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeft, Download, LoaderCircle, WalletCards } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   cancelCustomerBooking,
   getCustomerBookingDetails,
@@ -35,6 +35,7 @@ import {
   getBookingSource,
   getBookingTicketLabel,
   getBookingTravelDate,
+  isSuccessfulPaymentStatus,
 } from "../../utils/booking.js";
 import { formatCurrency, formatDate } from "../../utils/format.js";
 import { queryKeys } from "../../utils/queryKeys.js";
@@ -47,6 +48,7 @@ import { downloadTripDetailsPdf } from "../../utils/trip-pdf.js";
 
 export function BookingDetailsPage() {
   const { id } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const addToast = useUiStore((state) => state.addToast);
@@ -113,12 +115,21 @@ export function BookingDetailsPage() {
   const sourceLabel = getBookingSource(booking);
   const destinationLabel = getBookingDestination(booking);
   const canBookReturnTrip = Boolean(sourceLabel && destinationLabel && travelDate);
-  const normalizedPaymentStatus = String(paymentStatus || "").toLowerCase();
-  const canMakePayment = !["paid", "successful", "completed", "complete", "verified"].includes(
-    normalizedPaymentStatus,
-  );
+  const hasSuccessfulPayment = isSuccessfulPaymentStatus(paymentStatus);
+  const canMakePayment = !hasSuccessfulPayment;
+  const verifiedTicketNumber = location.state?.ticketNumber || getBookingNumber(booking);
+  const showPaymentSuccessBanner = Boolean(location.state?.paymentSuccessful);
 
   const handleDownloadPdf = async () => {
+    if (!hasSuccessfulPayment) {
+      addToast({
+        type: "error",
+        title: "Payment required",
+        message: "Trip PDF is available only after payment is successful.",
+      });
+      return;
+    }
+
     try {
       setIsExportingPdf(true);
 
@@ -260,24 +271,40 @@ export function BookingDetailsPage() {
               Book return trip
             </button>
 
-            <button
-              type="button"
-              onClick={handleDownloadPdf}
-              disabled={isExportingPdf}
-              className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand-200 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isExportingPdf ? (
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4" />
-              )}
-              {isExportingPdf ? "Preparing PDF..." : "Download trip PDF"}
-            </button>
+            {hasSuccessfulPayment ? (
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={isExportingPdf}
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-brand-200 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isExportingPdf ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                {isExportingPdf ? "Preparing PDF..." : "Download trip PDF"}
+              </button>
+            ) : null}
           </div>
         </div>
 
         {bookingDetailsQuery.error ? <ErrorAlert error={bookingDetailsQuery.error} /> : null}
         {cancelMutation.error ? <ErrorAlert error={cancelMutation.error} /> : null}
+
+        {showPaymentSuccessBanner ? (
+          <div className="rounded-[2rem] border border-emerald-200 bg-emerald-50 p-6 text-emerald-900 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">
+              Payment Successful
+            </p>
+            <h2 className="mt-3 text-2xl font-bold text-emerald-950">
+              Ticket No: {verifiedTicketNumber}
+            </h2>
+            <p className="mt-2 text-sm text-emerald-800">
+              Your payment has been verified and your ticket is now ready.
+            </p>
+          </div>
+        ) : null}
 
         <div className="space-y-6">
           <TicketDetailsCard booking={{ ...booking, payments, paymentStatus }} />

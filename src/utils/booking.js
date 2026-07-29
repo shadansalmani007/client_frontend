@@ -4,6 +4,10 @@ export function getBookingId(booking) {
   return booking?._id || booking?.id || booking?.bookingId || booking?.booking?._id;
 }
 
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== "");
+}
+
 function normalizeTicketNumber(value) {
   const normalized = String(value || "").trim();
 
@@ -22,16 +26,27 @@ function normalizeTicketNumber(value) {
   return suffix ? `Bk-${suffix}` : "Bk";
 }
 
+export function getBookingNumberValue(booking) {
+  return firstDefined(
+    booking?.bookingNumber,
+    booking?.ticketNumber,
+    booking?.ticketNo,
+    booking?.ticket?.bookingNumber,
+    booking?.ticket?.ticketNumber,
+    booking?.ticket?.ticketNo,
+    booking?.ticket?.number,
+    booking?.booking?.bookingNumber,
+    booking?.booking?.ticketNumber,
+    booking?.booking?.ticketNo,
+  );
+}
+
 export function getBookingNumber(booking) {
-  return normalizeTicketNumber(booking?.bookingNumber || getBookingId(booking) || "Booking");
+  return normalizeTicketNumber(getBookingNumberValue(booking) || getBookingId(booking) || "Booking");
 }
 
 export function getBookingTicketLabel(booking) {
   return `Ticket No: ${getBookingNumber(booking)}`;
-}
-
-function firstDefined(...values) {
-  return values.find((value) => value !== undefined && value !== null && value !== "");
 }
 
 function asArray(value) {
@@ -281,6 +296,12 @@ export function getBookingPaymentStatus(details) {
   return firstDefined(
     getBookingPayments(details)?.[0]?.status,
     details?.booking?.paymentStatus,
+  );
+}
+
+export function isSuccessfulPaymentStatus(value) {
+  return ["paid", "successful", "completed", "complete", "verified"].includes(
+    String(value || "").toLowerCase(),
   );
 }
 

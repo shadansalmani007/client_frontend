@@ -18,18 +18,25 @@ import { useAuthStore } from "../../store/auth.store.js";
 import { MAX_SEATS_PER_BOOKING, useBookingStore } from "../../store/booking.store.js";
 import { useSearchStore } from "../../store/search.store.js";
 import { useUiStore } from "../../store/ui.store.js";
-import { getSeatAvailabilitySeatNumbers } from "../../utils/booking.js";
+import { getResolvedFare } from "../../utils/fare.js";
+import { formatDate, hasDateTimePassed } from "../../utils/format.js";
 import { queryKeys } from "../../utils/queryKeys.js";
 import {
   findLocationPoint,
   formatLocationPoint,
   getLocationPointDescription,
   getLocationPointKey,
+  getRouteStopArrivalTime,
+  getRouteStopDepartureTime,
   getStopDisplayName,
   normalizeIntermediateStops,
   normalizeLocationPoints,
   toBookingPoint,
 } from "../../utils/route-segments.js";
+import {
+  buildSeatRenderModel,
+  normalizeSeatLayoutResponse,
+} from "../../utils/seat-map.js";
 
 const CUSTOMER_BOOKING_TEST_VALUES = {
   busId: "6a0c3c30efd81d45bfa9ff01",
@@ -39,37 +46,16 @@ const CUSTOMER_BOOKING_TEST_VALUES = {
   destination: "ndola",
   date: "2026-05-20",
 };
+const EMPTY_SEAT_DATA = normalizeSeatLayoutResponse({});
 
 function normalizeSeatNumber(value) {
   return String(value ?? "").trim();
 }
 
-function isLuggageLayoutCell(cell) {
-  const rawType = String(cell?.type ?? cell?.kind ?? cell?.category ?? "").trim().toLowerCase();
-
-  return (
-    rawType.includes("luggage") ||
-    rawType.includes("baggage") ||
-    rawType.includes("bag")
-  );
-}
-
-function getLayoutLuggageSeatNumbers(layout) {
-  const seats = Array.isArray(layout?.seats) ? layout.seats : [];
-
-  return seats
-    .filter(isLuggageLayoutCell)
-    .map((seat) =>
-      normalizeSeatNumber(
-        seat?.seatNumber ??
-          seat?.number ??
-          seat?.label ??
-          seat?.name ??
-          seat?.code ??
-          seat?.id,
-      ),
-    )
-    .filter(Boolean);
+function getRenderModelSeatNumbers(renderModel) {
+  return Array.isArray(renderModel?.seatNumbers)
+    ? renderModel.seatNumbers.map(normalizeSeatNumber).filter(Boolean)
+    : [];
 }
 
 function getScheduleContext(id, searchParams) {
@@ -77,6 +63,8 @@ function getScheduleContext(id, searchParams) {
     import.meta.env.DEV &&
     id === CUSTOMER_BOOKING_TEST_VALUES.busId &&
     !searchParams.get("scheduleId");
+  const basePriceValue = searchParams.get("basePrice");
+  const parsedBasePrice = Number(basePriceValue);
 
   return {
     busId: id,
@@ -94,6 +82,8 @@ function getScheduleContext(id, searchParams) {
     destination:
       searchParams.get("destination") ||
       (useTestingFallback ? CUSTOMER_BOOKING_TEST_VALUES.destination : ""),
+    basePrice: Number.isFinite(parsedBasePrice) ? parsedBasePrice : 0,
+    currency: searchParams.get("currency") || "",
   };
 }
 
@@ -230,31 +220,26 @@ export function BusDetailsPage() {
   const watchedPaymentMethod = watch("paymentMethod");
 
   const bus = busQuery.data || {};
-  const seatData = seatsQuery.data || {};
+  const seatData = seatsQuery.data || EMPTY_SEAT_DATA;
+  const layout = seatData.layout || {};
+  const renderModel = useMemo(() => buildSeatRenderModel(layout), [layout]);
   const seatLimitMessage = `You can book a maximum of ${MAX_SEATS_PER_BOOKING} seats at a time.`;
   const availableSeatNumbers = useMemo(
-    () => getSeatAvailabilitySeatNumbers(seatData.availableSeats),
-    [seatData.availableSeats],
+    () => seatData.seatState?.available ?? [],
+    [seatData.seatState],
   );
   const bookedSeatNumbers = useMemo(
-    () => getSeatAvailabilitySeatNumbers(seatData.bookedSeats),
-    [seatData.bookedSeats],
+    () => seatData.seatState?.booked ?? [],
+    [seatData.seatState],
   );
   const blockedSeatNumbers = useMemo(
-    () => getSeatAvailabilitySeatNumbers(seatData.blockedSeats),
-    [seatData.blockedSeats],
+    () => seatData.seatState?.blocked ?? [],
+    [seatData.seatState],
   );
-  const layoutLuggageSeatNumbers = useMemo(
-    () => getLayoutLuggageSeatNumbers(seatData.layout),
-    [seatData.layout],
+  const renderSeatNumbers = useMemo(
+    () => getRenderModelSeatNumbers(renderModel),
+    [renderModel],
   );
-  const visibleAvailableSeatCount = useMemo(() => {
-    const restoredLayoutSlots = layoutLuggageSeatNumbers.filter(
-      (seatNumber) => !availableSeatNumbers.includes(seatNumber),
-    ).length;
-
-    return availableSeatNumbers.length + restoredLayoutSlots;
-  }, [availableSeatNumbers, layoutLuggageSeatNumbers]);
   const boardingPoints = useMemo(() => {
     const points =
       seatData.boardingPoints?.length > 0
@@ -289,8 +274,97 @@ export function BusDetailsPage() {
     () => (requiresDrop ? findLocationPoint(droppingPoints, selectedDropKey) : null),
     [droppingPoints, requiresDrop, selectedDropKey],
   );
-  const basePrice = seatData.basePrice ?? bus.basePrice ?? 0;
-  const currency = seatData.currency ?? bus.currency ?? "ZMW";
+  const contextBasePrice = Number(activeContext?.basePrice);
+  const seatFare = getResolvedFare(seatData);
+  const busFare = getResolvedFare(bus);
+  const basePrice =
+    seatFare ??
+    (Number.isFinite(contextBasePrice) && contextBasePrice > 0 ? contextBasePrice : null) ??
+    busFare ??
+    0;
+  const currency = seatData.currency ?? activeContext?.currency ?? bus.currency ?? "ZMW";
+  const tripDepartureTime = useMemo(
+    () =>
+      getRouteStopDepartureTime(
+        activeContext?.sourceStop,
+        seatData.effectiveDepartureTime ||
+          seatData.departureTime ||
+          bus.effectiveDepartureTime ||
+          bus.departureTime ||
+          "",
+      ),
+    [
+      activeContext?.sourceStop,
+      bus.departureTime,
+      bus.effectiveDepartureTime,
+      seatData.departureTime,
+      seatData.effectiveDepartureTime,
+    ],
+  );
+  const tripArrivalTime = useMemo(
+    () =>
+      getRouteStopArrivalTime(
+        activeContext?.destinationStop,
+        seatData.effectiveArrivalTime ||
+          seatData.arrivalTime ||
+          bus.effectiveArrivalTime ||
+          bus.arrivalTime ||
+          "",
+      ),
+    [
+      activeContext?.destinationStop,
+      bus.arrivalTime,
+      bus.effectiveArrivalTime,
+      seatData.arrivalTime,
+      seatData.effectiveArrivalTime,
+    ],
+  );
+  const tripAlreadyDeparted = useMemo(
+    () => hasDateTimePassed(activeContext?.date || "", tripDepartureTime),
+    [activeContext?.date, tripDepartureTime],
+  );
+  const effectiveAvailableSeatNumbers = useMemo(
+    () => (tripAlreadyDeparted ? [] : availableSeatNumbers),
+    [availableSeatNumbers, tripAlreadyDeparted],
+  );
+  const effectiveBlockedSeatNumbers = useMemo(
+    () =>
+      tripAlreadyDeparted
+        ? Array.from(new Set([...blockedSeatNumbers, ...renderSeatNumbers]))
+        : blockedSeatNumbers,
+    [blockedSeatNumbers, renderSeatNumbers, tripAlreadyDeparted],
+  );
+  const visibleAvailableSeatCount = useMemo(() => {
+    if (tripAlreadyDeparted) {
+      return 0;
+    }
+
+    if (effectiveAvailableSeatNumbers.length) {
+      return effectiveAvailableSeatNumbers.length;
+    }
+
+    return renderSeatNumbers.filter(
+      (seatNumber) =>
+        !bookedSeatNumbers.includes(seatNumber) &&
+        !effectiveBlockedSeatNumbers.includes(seatNumber),
+    ).length;
+  }, [
+    bookedSeatNumbers,
+    effectiveAvailableSeatNumbers,
+    effectiveBlockedSeatNumbers,
+    renderSeatNumbers,
+    tripAlreadyDeparted,
+  ]);
+  const departureClosedMessage = useMemo(() => {
+    if (!tripAlreadyDeparted) {
+      return "";
+    }
+
+    const sourceName = activeContext?.source || bus.source || "this stop";
+    const tripDate = activeContext?.date ? formatDate(activeContext.date) : "the selected date";
+    const departureTimeLabel = tripDepartureTime || "the scheduled departure time";
+    return `This bus already departed from ${sourceName} at ${departureTimeLabel} on ${tripDate}. Booking is closed for this trip.`;
+  }, [activeContext?.date, activeContext?.source, bus.source, tripAlreadyDeparted, tripDepartureTime]);
 
   useEffect(() => {
     const currentPassengerRows = getValues("passengers") || [];
@@ -326,16 +400,25 @@ export function BusDetailsPage() {
   }, [setValue, user?.email, user?.phone, watchedContactEmail, watchedContactPhone]);
 
   useEffect(() => {
-    if (!availableSeatNumbers.length) {
+    if (tripAlreadyDeparted) {
+      if (selectedSeats.length) {
+        syncPassengers([]);
+      }
       return;
     }
 
-    const validSelectedSeats = selectedSeats.filter((seat) => availableSeatNumbers.includes(seat));
+    if (!effectiveAvailableSeatNumbers.length) {
+      return;
+    }
+
+    const validSelectedSeats = selectedSeats.filter((seat) =>
+      effectiveAvailableSeatNumbers.includes(seat),
+    );
 
     if (validSelectedSeats.length !== selectedSeats.length) {
       syncPassengers(validSelectedSeats);
     }
-  }, [availableSeatNumbers, selectedSeats, syncPassengers]);
+  }, [effectiveAvailableSeatNumbers, selectedSeats, syncPassengers, tripAlreadyDeparted]);
 
   useEffect(() => {
     if (selectedSeats.length > MAX_SEATS_PER_BOOKING) {
@@ -439,7 +522,15 @@ export function BusDetailsPage() {
   ]);
 
   const createBookingMutation = useMutation({
-    mutationFn: createCustomerBooking,
+    mutationFn: async (payload) => {
+      if (tripAlreadyDeparted) {
+        throw new Error(
+          departureClosedMessage || "This trip has already departed and can no longer be booked.",
+        );
+      }
+
+      return createCustomerBooking(payload);
+    },
     onSuccess: async (result) => {
       const booking = result?.booking || {};
       const bookingId = booking?._id || booking?.id;
@@ -475,6 +566,7 @@ export function BusDetailsPage() {
     watchedPassengers.every(isPassengerComplete);
   const canSubmit =
     hasRequiredTripContext &&
+    !tripAlreadyDeparted &&
     selectedSeats.length > 0 &&
     Boolean(String(watchedContactEmail || "").trim()) &&
     Boolean(String(watchedContactPhone || "").trim()) &&
@@ -486,6 +578,11 @@ export function BusDetailsPage() {
     !createBookingMutation.isPending;
 
   const onSubmit = (values) => {
+    if (tripAlreadyDeparted) {
+      setBookingError(departureClosedMessage || "This trip has already departed and can no longer be booked.");
+      return;
+    }
+
     if (!selectedSeats.length) {
       setBookingError("Please choose at least one available seat.");
       return;
@@ -725,14 +822,20 @@ export function BusDetailsPage() {
         <ErrorAlert error={createBookingMutation.error} title="Booking failed" />
       ) : null}
 
-      <button
-        type="button"
-        onClick={handleSubmit(onSubmit)}
-        disabled={!canSubmit}
-        className="inline-flex w-full items-center justify-center rounded-full bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/20 transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-70"
-      >
-        {createBookingMutation.isPending ? "Creating booking..." : "Create booking"}
-      </button>
+      <div className="flex justify-center">
+        <button
+          type="button"
+          onClick={handleSubmit(onSubmit)}
+          disabled={!canSubmit}
+          className="inline-flex w-full max-w-sm items-center justify-center rounded-full bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/20 transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {tripAlreadyDeparted
+            ? "Booking closed"
+            : createBookingMutation.isPending
+              ? "Creating booking..."
+              : "Create booking"}
+        </button>
+      </div>
     </div>
   );
 
@@ -763,6 +866,15 @@ export function BusDetailsPage() {
           {!seatsQuery.isLoading && !seatsQuery.error && activeContext?.scheduleId ? (
             <>
               <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+                {tripAlreadyDeparted ? (
+                  <div className="mb-6">
+                    <ErrorAlert
+                      error={{ message: departureClosedMessage }}
+                      title="Booking closed"
+                    />
+                  </div>
+                ) : null}
+
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-semibold text-slate-900">Choose seats</h2>
@@ -774,12 +886,21 @@ export function BusDetailsPage() {
 
                 <div className="mt-6">
                   <SeatMap
-                    layout={seatData.layout}
-                    availableSeats={availableSeatNumbers}
+                    layout={layout}
+                    renderModel={renderModel}
+                    availableSeats={effectiveAvailableSeatNumbers}
                     bookedSeats={bookedSeatNumbers}
-                    blockedSeats={blockedSeatNumbers}
+                    blockedSeats={effectiveBlockedSeatNumbers}
                     selectedSeats={selectedSeats}
                     onToggleSeat={(seatNumber) => {
+                      if (tripAlreadyDeparted) {
+                        setBookingError(
+                          departureClosedMessage ||
+                            "This trip has already departed and can no longer be booked.",
+                        );
+                        return;
+                      }
+
                       if (
                         !selectedSeats.includes(seatNumber) &&
                         selectedSeats.length >= MAX_SEATS_PER_BOOKING
@@ -809,6 +930,8 @@ export function BusDetailsPage() {
                   />
                 </div>
               ) : null}
+
+              {contactAndPaymentSection}
             </>
           ) : null}
         </div>
@@ -818,8 +941,8 @@ export function BusDetailsPage() {
             source={activeContext.source || bus.source}
             destination={activeContext.destination || bus.destination}
             date={activeContext.date}
-            departureTime={seatData.departureTime || bus.departureTime}
-            arrivalTime={seatData.arrivalTime || bus.arrivalTime}
+            departureTime={tripDepartureTime}
+            arrivalTime={tripArrivalTime}
             selectedSeats={selectedSeats}
             basePrice={basePrice}
             currency={currency}
@@ -861,10 +984,10 @@ export function BusDetailsPage() {
 
           {passengerDetailsSection}
           {pickupAndDropSection}
-          {contactAndPaymentSection}
-          {bookingActionsSection}
         </div>
       </div>
+
+      <div className="mt-8">{bookingActionsSection}</div>
 
       <SeatLimitModal
         isOpen={showSeatLimitModal}

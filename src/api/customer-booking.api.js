@@ -5,14 +5,26 @@ import {
   getPagination,
   getResponseData,
 } from "../utils/booking.js";
+import { normalizeSeatLayoutResponse } from "../utils/seat-map.js";
 import "../types/customer-booking.types.js";
 
 function normalizeBookingDetailsResponse(payload) {
   const data = getResponseData(payload);
+  const ticket = data?.ticket && typeof data.ticket === "object" ? data.ticket : null;
+  const bookingSource = data?.booking ?? data?.ticket?.booking ?? data?.ticket ?? data ?? {};
+  const booking =
+    ticket && ticket !== bookingSource
+      ? { ...bookingSource, ticket }
+      : bookingSource;
 
   return {
-    booking: data?.booking ?? data ?? {},
-    payments: data?.payments ?? data?.booking?.payments ?? [],
+    booking,
+    payments:
+      data?.payments ??
+      data?.booking?.payments ??
+      data?.ticket?.payments ??
+      data?.ticket?.booking?.payments ??
+      [],
     seatAvailability: data?.seatAvailability ?? null,
     meta: data?.meta ?? payload?.meta ?? {},
     message: payload?.message ?? data?.message ?? "",
@@ -89,5 +101,5 @@ export async function getCustomerSeatAvailability(busId, query) {
     params: query,
   });
 
-  return getResponseData(response);
+  return normalizeSeatLayoutResponse(getResponseData(response));
 }
